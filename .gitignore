@@ -1,0 +1,68 @@
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Variáveis de ambiente
+.env
+
+# Pastas de trabalho locais (não fazem parte da entrega)
+_to_delete/
+
+# Dataset (arquivos grandes — não versionar; ver slm/generate_dataset.py para
+# regenerar o sintético, e o Hugging Face Hub para o dataset real)
+dataset/train/images/*
+dataset/train/labels/*
+dataset/val/images/*
+dataset/val/labels/*
+dataset/raw_images/*
+dataset/synthetic/images/*
+dataset/synthetic/labels/*
+dataset/synthetic/florence2/*
+dataset/synthetic/*.zip
+
+# Pesos do modelo — exceto o best.pt final, que É versionado de propósito:
+# é o artefato treinado que a API carrega para rodar a demo sem precisar
+# retreinar (22MB, bem dentro do limite do GitHub).
+slm/weights/*
+!slm/weights/stride_yolov8s/
+slm/weights/stride_yolov8s/*
+!slm/weights/stride_yolov8s/best.pt
+
+# Manter os .gitkeep
+!**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter — ignora notebooks em geral, exceto o notebook de treino com os
+# outputs reais do Kaggle (evidência de execução, não só código-fonte)
+.ipynb_checkpoints/
+*.ipynb
+!slm/notebook-stride-architecture-components.ipynb
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs e relatórios gerados
+*.log
+reports/output/
+
+# Arquivos temporários do diagrams/graphviz
+*.dot

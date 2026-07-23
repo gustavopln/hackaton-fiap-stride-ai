@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>Relatório STRIDE — {{ diagram_name }}</title>
+<style>
+    @page {
+        size: A4;
+        margin: 2cm 1.6cm;
+        @bottom-center {
+            content: "Página " counter(page) " de " counter(pages);
+            font-size: 9px;
+            color: #888;
+        }
+    }
+    * { box-sizing: border-box; }
+    body {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        color: #1f2430;
+        font-size: 12px;
+        line-height: 1.45;
+    }
+    h1, h2, h3 { margin: 0 0 6px 0; color: #14213d; }
+    .header {
+        border-bottom: 3px solid #14213d;
+        padding-bottom: 10px;
+        margin-bottom: 16px;
+    }
+    .header h1 { font-size: 22px; }
+    .header .subtitle { color: #555; font-size: 12px; }
+    .meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10.5px;
+        color: #666;
+        margin-top: 6px;
+    }
+
+    /* ── Sumário executivo ─────────────────────────────────────────── */
+    .summary {
+        display: flex;
+        gap: 10px;
+        margin: 16px 0 20px 0;
+    }
+    .summary-card {
+        flex: 1;
+        border: 1px solid #e1e4ea;
+        border-radius: 6px;
+        padding: 10px 12px;
+        background: #f8f9fc;
+    }
+    .summary-card .value { font-size: 20px; font-weight: 700; color: #14213d; }
+    .summary-card .label { font-size: 9.5px; color: #666; text-transform: uppercase; letter-spacing: .03em; }
+
+    .sev-badge, .conf-badge, .source-badge {
+        display: inline-block;
+        padding: 1px 7px;
+        border-radius: 10px;
+        font-size: 9.5px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .02em;
+    }
+    .sev-critical { background: #fde0df; color: #9b1c1c; }
+    .sev-high     { background: #fde8d2; color: #a35709; }
+    .sev-medium   { background: #fff3c4; color: #8a6d00; }
+    .sev-low      { background: #e2f0e5; color: #226b3a; }
+
+    .conf-high   { background: #dbeee0; color: #1f7a3f; }
+    .conf-medium { background: #eef1d6; color: #706b0f; }
+    .conf-low    { background: #f0e2e2; color: #8a3030; }
+
+    .source-badge { background: #e8ecf7; color: #2b3f8c; margin-right: 3px; font-weight: 600; }
+
+    /* ── Fronteiras de confiança ───────────────────────────────────── */
+    .boundaries {
+        margin: 4px 0 20px 0;
+        padding: 10px 12px;
+        border-left: 3px solid #8c9bd6;
+        background: #f4f6fc;
+        border-radius: 0 6px 6px 0;
+    }
+    .boundaries h3 { font-size: 12.5px; margin-bottom: 6px; }
+    .boundaries ul { margin: 0; padding-left: 16px; }
+    .boundaries li { margin-bottom: 3px; }
+
+    /* ── Componentes / ameaças ─────────────────────────────────────── */
+    .component {
+        page-break-inside: avoid;
+        border: 1px solid #e1e4ea;
+        border-radius: 6px;
+        margin-bottom: 14px;
+        overflow: hidden;
+    }
+    .component-header {
+        background: #14213d;
+        color: #fff;
+        padding: 7px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .component-header .name { font-size: 13px; font-weight: 700; }
+    .component-header .count { font-size: 10px; color: #c7cfe6; }
+
+    table.threats { width: 100%; border-collapse: collapse; }
+    table.threats th {
+        background: #f2f4f9;
+        text-align: left;
+        font-size: 9.5px;
+        text-transform: uppercase;
+        letter-spacing: .02em;
+        color: #555;
+        padding: 6px 10px;
+        border-bottom: 1px solid #e1e4ea;
+    }
+    table.threats td {
+        padding: 7px 10px;
+        border-bottom: 1px solid #f0f1f5;
+        vertical-align: top;
+        font-size: 10.5px;
+    }
+    table.threats tr:last-child td { border-bottom: none; }
+    .cat-cell { font-weight: 700; white-space: nowrap; }
+    .cat-cell .cat-name { display: block; font-weight: 400; font-size: 9px; color: #888; }
+    ul.countermeasures { margin: 4px 0 0 0; padding-left: 14px; }
+    ul.countermeasures li { margin-bottom: 2px; }
+
+    .empty-state {
+        text-align: center;
+        color: #888;
+        padding: 30px 0;
+        font-size: 11px;
+    }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Relatório de Modelagem de Ameaças — STRIDE</h1>
+    <div class="subtitle">{{ diagram_name }}</div>
+    <div class="meta">
+        <span>Gerado em {{ generated_at }}</span>
+        <span>Pipeline: SLM (YOLOv8 + heurística) · Claude · GPT-4o · Consensus Engine</span>
+    </div>
+</div>
+
+<div class="summary">
+    <div class="summary-card">
+        <div class="value">{{ summary.total_components }}</div>
+        <div class="label">Componentes analisados</div>
+    </div>
+    <div class="summary-card">
+        <div class="value">{{ total_threats }}</div>
+        <div class="label">Ameaças identificadas</div>
+    </div>
+    <div class="summary-card">
+        <div class="value">{{ summary.agreement_high }}</div>
+        <div class="label">Alta concordância (3/3 modelos)</div>
+    </div>
+    <div class="summary-card">
+        <div class="value">{{ summary.agreement_medium }}</div>
+        <div class="label">Média concordância (2/3 modelos)</div>
+    </div>
+    <div class="summary-card">
+        <div class="value">{{ severity_counts.critical + severity_counts.high }}</div>
+        <div class="label">Severidade alta/crítica</div>
+    </div>
+</div>
+
+{% if trust_boundaries %}
+<div class="boundaries">
+    <h3>Fronteiras de confiança identificadas no diagrama</h3>
+    <ul>
+    {% for b in trust_boundaries %}
+        <li><strong>{{ b.node_name }}</strong> ({{ b.class_name }}) — {{ b.note }}</li>
+    {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<h2>Ameaças por componente</h2>
+
+{% if components %}
+    {% for comp in components %}
+    <div class="component">
+        <div class="component-header">
+            <span class="name">{{ comp.component_id }}</span>
+            <span class="count">{{ comp.threat_count }} ameaça(s) aplicável(is)</span>
+        </div>
+        {% if comp.threats %}
+        <table class="threats">
+            <thead>
+                <tr>
+                    <th style="width: 9%;">Categoria</th>
+                    <th style="width: 24%;">Descrição</th>
+                    <th style="width: 8%;">Severidade</th>
+                    <th style="width: 10%;">Confiança</th>
+                    <th style="width: 14%;">Detectado por</th>
+                    <th style="width: 35%;">Contramedidas recomendadas</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for t in comp.threats %}
+                <tr>
+                    <td class="cat-cell">{{ t.category }}<span class="cat-name">{{ t.category_label }}</span></td>
+                    <td>{{ t.description }}</td>
+                    <td><span class="sev-badge sev-{{ t.severity }}">{{ t.severity }}</span></td>
+                    <td><span class="conf-badge conf-{{ t.confidence }}">{{ t.confidence }}</span></td>
+                    <td>
+                        {% for src in t.detected_by %}<span class="source-badge">{{ src }}</span>{% endfor %}
+                    </td>
+                    <td>
+                        {% if t.countermeasures %}
+                        <ul class="countermeasures">
+                        {% for c in t.countermeasures %}
+                            <li>{{ c }}</li>
+                        {% endfor %}
+                        </ul>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">Nenhuma ameaça aplicável identificada para este componente.</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty-state">Nenhum componente detectado nesta análise.</div>
+{% endif %}
+
+</body>
+</html>

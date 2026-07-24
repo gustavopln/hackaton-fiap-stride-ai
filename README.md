@@ -113,6 +113,8 @@ Treino executado no Kaggle (GPU T4 x2) — [notebook completo com os outputs rea
 
 O recall alto (0,88) mostra que o modelo raramente deixa de detectar um componente presente no diagrama — importante para não deixar ameaças de fora da análise. A precision mais moderada (0,55) reflete alguns falsos positivos entre classes visualmente parecidas (ex. variações de ícones de computação); esse ruído é absorvido pelas Camadas 2 e 3, já que Claude e GPT-4o reavaliam cada componente contra a imagem original antes do relatório final. Gráficos completos (matriz de confusão, curvas P/R/F1, batches de validação) em `docs/training_results/`.
 
+A taxonomia das 32 classes e imagens de apoio para desenvolvimento e testes tiveram como referência o dataset público de Guilherme Santos no Hugging Face (ver [Referências](#referências)).
+
 ## Teste end-to-end
 
 O pipeline foi validado com as duas arquiteturas de referência fornecidas no enunciado do hackathon (AWS multi-AZ e Azure API Management, em `docs/fiap_test_architectures/`), gerando relatórios completos em PDF com detecção de componentes, ameaças por categoria STRIDE, score de concordância entre as 3 fontes e contramedidas recomendadas para cada ameaça aplicável.
@@ -125,6 +127,10 @@ O pipeline foi validado com as duas arquiteturas de referência fornecidas no en
 ## Stack
 
 Python · FastAPI · Streamlit · Ultralytics YOLOv8 · Anthropic Claude · OpenAI GPT-4o · Jinja2 + WeasyPrint (PDF) · Pillow/diagrams (geração do dataset sintético)
+
+## Referências
+
+- SANTOS, Guilherme. **STRIDE Architecture Threat Modeling Dataset (AWS & Azure)**. Hugging Face Datasets, licença MIT. Disponível em: [huggingface.co/datasets/guillherms/stride-architecture-components-v1](https://huggingface.co/datasets/guillherms/stride-architecture-components-v1). Dataset com 4.190 imagens anotadas em 32 classes (formato YOLO) de componentes de diagramas de arquitetura AWS e Azure — usado como referência para a taxonomia de classes e para imagens de apoio no desenvolvimento e testes deste projeto.
 
 ## Autor
 

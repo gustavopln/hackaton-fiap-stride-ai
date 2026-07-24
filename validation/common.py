@@ -50,6 +50,9 @@ Regras:
   neste contexto específico — mesmo assim inclua a chave, com "description" explicando o porquê.
 - Não invente componentes que não estão na lista de entrada.
 - As 6 categorias (S, T, R, I, D, E) devem estar sempre presentes para cada componente.
+- O campo "description" deve ser escrito SEMPRE em português do Brasil (pt-BR), mesmo que o
+  restante do seu raciocínio interno seja em outro idioma — o relatório final é consumido por
+  um público brasileiro e mistura de idiomas entre fontes (SLM/Claude/GPT-4o) prejudica a leitura.
 """
 
 

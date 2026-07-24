@@ -1,45 +1,95 @@
 """
 Validação via Claude API (Camada 2 — Validação Multi-LLM).
 
-Recebe: imagem do diagrama + lista de componentes detectados pelo SLM (YOLO)
-Retorna: análise STRIDE por componente — mesmo schema de openai_validator.validate(),
-para que o Consensus Engine (validation/consensus.py) possa comparar os dois
-sem tratamento especial por modelo.
+Recebe: imagem do diagrama + JSON com componentes detectados pelo SLM
+Retorna: análise STRIDE por componente, no mesmo schema do openai_validator.py
+(ver validation/common.py — SYSTEM_PROMPT compartilhado entre os dois).
 
-Requer ANTHROPIC_API_KEY no ambiente (copie .env.example para .env e preencha).
-
-Uso:
-    from validation.claude_validator import validate
-
-    result = validate("diagrama.png", [
-        {"component_id": "comp_1", "class_name": "data_database", "label": "RDS"},
-        {"component_id": "comp_2", "class_name": "edge_waf", "label": "WAF"},
-    ])
+Modelo configurável via env var CLAUDE_MODEL (default: claude-sonnet-5) —
+caso a API rejeite o modelo (ex. "model not found" por descontinuação),
+ajuste no .env sem precisar mexer no código.
 """
 
-import os
 import json
+import os
 
-from dotenv import load_dotenv
 import anthropic
 
 from validation.common import (
     SYSTEM_PROMPT,
-    encode_image_b64,
-    guess_media_type,
     components_to_prompt_json,
+    encode_image_b64,
     extract_json,
+    guess_media_type,
 )
 
-load_dotenv()
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
+# 4096 truncava o JSON no meio de diagramas com muitos componentes (13+
+# componentes x 6 categorias STRIDE facilmente passa de 4096 tokens de saída,
+# cortando a resposta e quebrando o parser). Claude Sonnet 5 suporta até
+# 128k de max_tokens — 8192 dá bastante folga sem custo relevante.
+MAX_TOKENS = 8192
 
-# Configurável via .env — troque se o nome do modelo mudar (ver console.anthropic.com/docs/models).
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+_client = None
 
 
-def encode_image(image_path: str) -> str:
-    """Mantido por compatibilidade com o contrato original do módulo."""
-    return encode_image_b64(image_path)
+def _get_client() -> anthropic.Anthropic:
+    global _client
+    if _client is None:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY não configurada. Defina no .env na raiz do projeto "
+                "e reinicie o backend (uvicorn) — variáveis de ambiente só são lidas na subida do processo."
+            )
+        # timeout explícito — sem isso, uma chamada travada na rede fica pendurada
+        # indefinidamente e o Streamlit só mostra "demorou demais", sem log nenhum
+        # no terminal do backend (o request nem chegou a falhar do lado do SDK).
+        _client = anthropic.Anthropic(api_key=api_key, timeout=90.0)
+    return _client
+
+
+def _call_claude(image_b64: str, media_type: str, components_json: str, correction: dict = None) -> str:
+    """Chama a Messages API com a imagem + componentes; opcionalmente reenviando
+    com um pedido de correção quando a resposta anterior não veio em JSON válido."""
+    client = _get_client()
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
+                {"type": "text", "text": f"Componentes detectados pelo SLM (YOLOv8):\n{components_json}"},
+            ],
+        }
+    ]
+    if correction:
+        messages.append({"role": "assistant", "content": correction["bad_text"]})
+        messages.append({
+            "role": "user",
+            "content": (
+                f"Sua resposta anterior não é um JSON válido ({correction['error']}). "
+                "Responda de novo, ESTRITAMENTE em JSON válido, sem markdown, sem texto fora do JSON."
+            ),
+        })
+
+    response = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=MAX_TOKENS,
+        system=SYSTEM_PROMPT,
+        messages=messages,
+        # Claude Sonnet 5 vem com "adaptive thinking" LIGADO por padrão
+        # (effort=high) — os tokens de raciocínio interno contam dentro do
+        # mesmo max_tokens e são cobrados, competindo com o JSON de resposta.
+        # É a causa real do 1º JSON vir cortado e do consumo na Anthropic
+        # estar mais alto que na OpenAI, não o modelo em si. Nossa tarefa é
+        # extração estruturada bem especificada pelo SYSTEM_PROMPT — não
+        # precisa de raciocínio estendido, então desligamos.
+        thinking={"type": "disabled"},
+    )
+    text = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+    truncated = response.stop_reason == "max_tokens"
+    return text, truncated
 
 
 def validate(image_path: str, slm_components: list) -> dict:
@@ -48,64 +98,33 @@ def validate(image_path: str, slm_components: list) -> dict:
 
     Args:
         image_path:      caminho para o PNG/JPG do diagrama
-        slm_components:  lista de dicts com class_name/label/bbox (saída do YOLO)
+        slm_components:  lista de dicts com class_name e bbox do SLM
 
     Returns:
-        dict {component_id: {"S": {...}, "T": {...}, "R": {...}, "I": {...}, "D": {...}, "E": {...}}}
+        dict com ameaças STRIDE por componente (mesmo schema do openai_validator)
 
     Raises:
-        RuntimeError:       se ANTHROPIC_API_KEY não estiver configurada
-        json.JSONDecodeError: se nem a resposta original nem a de correção forem JSON válido
+        RuntimeError: se ANTHROPIC_API_KEY não estiver configurada
+        json.JSONDecodeError: se, mesmo após 1 retentativa de correção, o
+            modelo não retornar JSON válido (mitigação parcial do risco
+            "LLM produz JSON malformado" — ver ESTRATEGIA_EXECUCAO.md)
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY não configurada — copie .env.example para .env e preencha."
-        )
+    image_b64 = encode_image_b64(image_path)
+    media_type = guess_media_type(image_path)
+    components_json = components_to_prompt_json(slm_components)
 
-    client = anthropic.Anthropic(api_key=api_key)
-
-    user_content = [
-        {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": guess_media_type(image_path),
-                "data": encode_image_b64(image_path),
-            },
-        },
-        {
-            "type": "text",
-            "text": (
-                "Componentes detectados pelo modelo de visão (YOLO):\n"
-                f"{components_to_prompt_json(slm_components)}"
-            ),
-        },
-    ]
-
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
-    )
-    raw_text = "".join(block.text for block in response.content if block.type == "text")
-
+    text, truncated = _call_claude(image_b64, media_type, components_json)
     try:
-        return extract_json(raw_text)
-    except json.JSONDecodeError:
-        # Re-prompt de recuperação — mitigação do risco "LLM produz JSON malformado"
-        # (ver ESTRATEGIA_EXECUCAO.md, seção 9 "Riscos e Mitigações").
-        fix = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=4096,
-            system=(
-                "Você corrige JSON malformado. Responda SOMENTE com o JSON corrigido, "
-                "sem comentários nem markdown."
-            ),
-            messages=[
-                {"role": "user", "content": f"Corrija este texto para ser um JSON válido:\n{raw_text}"}
-            ],
+        return extract_json(text)
+    except json.JSONDecodeError as exc:
+        error_msg = (
+            "resposta cortada por atingir o limite de tokens — seja mais conciso nas "
+            "\"description\" (1 frase curta) para caber todos os componentes"
+            if truncated else str(exc)
         )
-        fixed_text = "".join(block.text for block in fix.content if block.type == "text")
-        return extract_json(fixed_text)
+        print(f"[claude_validator] 1ª resposta não é JSON válido ({error_msg}) — refazendo com correção...")
+        text_retry, _ = _call_claude(
+            image_b64, media_type, components_json,
+            correction={"bad_text": text, "error": error_msg},
+        )
+        return extract_json(text_retry)

@@ -22,11 +22,30 @@ import streamlit as st
 from PIL import Image, ImageDraw
 
 API_BASE_URL_DEFAULT = os.getenv("API_BASE_URL", "http://localhost:8000")
-REQUEST_TIMEOUT = 120  # segundos — Claude + GPT-4o em paralelo podem levar um tempo em imagens com muitos componentes
+# segundos — Claude + GPT-4o rodam em paralelo, mas cada um pode levar até ~90s
+# (timeout do SDK) e, se a 1ª resposta vier com JSON malformado/cortado, ainda
+# tem 1 retentativa automática (mais uma chamada completa). 240s cobre o pior
+# caso (retry) com folga, sem deixar a UI travada pra sempre se algo pendurar.
+REQUEST_TIMEOUT = 240
 
 SEVERITY_LABELS = {"critical": "🔴 Critical", "high": "🟠 High", "medium": "🟡 Medium", "low": "🟢 Low"}
 CONFIDENCE_LABELS = {"high": "🟢 Alta (3/3)", "medium": "🟡 Média (2/3)", "low": "🔴 Baixa (1/3)"}
 BOX_COLOR = "#2b6cb0"
+
+
+def _safe_call(fn, *args, **kwargs):
+    """
+    Chama fn(*args, **kwargs) com tolerância a diferenças de versão do
+    Streamlit — ex. `use_container_width` foi adicionado em versões mais
+    recentes de st.image/st.button/st.dataframe e pode não existir (ou já ter
+    sido substituído) dependendo da versão instalada. Se o kwarg não for
+    aceito, tenta de novo sem ele em vez de quebrar a página inteira.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except TypeError:
+        kwargs.pop("use_container_width", None)
+        return fn(*args, **kwargs)
 
 st.set_page_config(page_title="STRIDE Architecture Analyzer", page_icon="🔐", layout="wide")
 
@@ -102,13 +121,11 @@ if uploaded_file is not None:
     image_bytes = uploaded_file.getvalue()
     st.session_state.uploaded_image = image_bytes
 
-    col_preview, col_action = st.columns([3, 1])
-    with col_preview:
-        st.image(image_bytes, caption=uploaded_file.name, use_container_width=True)
-    with col_action:
-        st.write("")
-        st.write("")
-        analyze_clicked = st.button("🔍 Analisar ameaças STRIDE", type="primary", use_container_width=True)
+    # Imagem em largura cheia com o botão logo abaixo — antes ficavam lado a
+    # lado em colunas, e como a imagem cria barra de rolagem, o botão acabava
+    # muito acima, fora da vista junto com as instruções de "Como funciona".
+    _safe_call(st.image, image_bytes, caption=uploaded_file.name, use_container_width=True)
+    analyze_clicked = _safe_call(st.button, "🔍 Analisar ameaças STRIDE", type="primary", use_container_width=True)
 
     if analyze_clicked:
         headers = {"X-API-Key": api_key} if api_key else {}
@@ -163,7 +180,7 @@ if data:
         st.subheader("Componentes detectados (Camada 1 — SLM/YOLOv8)")
         original = Image.open(BytesIO(st.session_state.uploaded_image))
         annotated = _draw_boxes(original, data["raw_components"])
-        st.image(annotated, use_container_width=True)
+        _safe_call(st.image, annotated, use_container_width=True)
 
     if data.get("trust_boundaries"):
         with st.expander(f"🧭 Fronteiras de confiança identificadas ({len(data['trust_boundaries'])})"):
@@ -174,7 +191,7 @@ if data:
     rows = _threats_to_rows(analysis)
     if rows:
         df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        _safe_call(st.dataframe, df, use_container_width=True, hide_index=True)
     else:
         st.info("Nenhuma ameaça aplicável identificada nesta análise.")
 

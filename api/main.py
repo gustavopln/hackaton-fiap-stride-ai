@@ -17,6 +17,7 @@ Rodar localmente:
 import asyncio
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -101,15 +102,25 @@ async def _run_validators(image_path: str, components: list[dict]) -> tuple[Opti
     calcula a concordância com as fontes restantes, em vez de derrubar a
     análise inteira. Falha parcial > falha total nesse pipeline.
     """
-    async def _safe_call(fn, *args):
+    async def _safe_call(label, fn, *args):
+        start = time.monotonic()
+        print(f"[validators] {label} iniciado...")
         try:
-            return await asyncio.to_thread(fn, *args)
+            result = await asyncio.to_thread(fn, *args)
+            elapsed = time.monotonic() - start
+            print(f"[validators] {label} respondeu em {elapsed:.1f}s")
+            return result
         except Exception as exc:  # noqa: BLE001 — isolamento de falha é intencional aqui
+            elapsed = time.monotonic() - start
+            # Loga no terminal do uvicorn para diagnóstico — sem isso, a falha
+            # vira só um "indisponível" genérico no frontend e fica impossível
+            # saber se foi chave ausente, rate limit, JSON malformado, etc.
+            print(f"[validators] {label} falhou após {elapsed:.1f}s: {exc!r}")
             return {"__error__": str(exc)}
 
     claude_result, openai_result = await asyncio.gather(
-        _safe_call(claude_validator.validate, image_path, components),
-        _safe_call(openai_validator.validate, image_path, components),
+        _safe_call("Claude", claude_validator.validate, image_path, components),
+        _safe_call("GPT-4o", openai_validator.validate, image_path, components),
     )
 
     claude_output = None if isinstance(claude_result, dict) and "__error__" in claude_result else claude_result

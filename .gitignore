@@ -6,9 +6,6 @@ env/
 # Variáveis de ambiente
 .env
 
-# Pastas de trabalho locais (não fazem parte da entrega)
-_to_delete/
-
 # Dataset (arquivos grandes — não versionar; ver slm/generate_dataset.py para
 # regenerar o sintético, e o Hugging Face Hub para o dataset real)
 dataset/train/images/*
@@ -62,7 +59,17 @@ desktop.ini
 
 # Logs e relatórios gerados
 *.log
+report/output/
 reports/output/
 
 # Arquivos temporários do diagrams/graphviz
 *.dot
+
+# Arquivo de trabalho para passar mensagem de commit multi-linha via
+# `git commit -F` (evita o bug de bracketed-paste do terminal) — não faz
+# parte do projeto em si.
+commit_msg.txt
+
+# Arquiteturas de teste extraídas do PDF da FIAP — usadas só localmente
+# para validar o pipeline (Task 15), não fazem parte do código-fonte.
+docs/fiap_test_architectures/

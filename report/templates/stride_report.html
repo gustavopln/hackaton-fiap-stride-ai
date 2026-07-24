@@ -39,11 +39,12 @@
     /* ── Sumário executivo ─────────────────────────────────────────── */
     .summary {
         display: flex;
+        flex-wrap: wrap;
         gap: 10px;
         margin: 16px 0 20px 0;
     }
     .summary-card {
-        flex: 1;
+        flex: 1 1 30%;
         border: 1px solid #e1e4ea;
         border-radius: 6px;
         padding: 10px 12px;
@@ -86,7 +87,6 @@
 
     /* ── Componentes / ameaças ─────────────────────────────────────── */
     .component {
-        page-break-inside: avoid;
         border: 1px solid #e1e4ea;
         border-radius: 6px;
         margin-bottom: 14px;
@@ -126,6 +126,10 @@
     ul.countermeasures { margin: 4px 0 0 0; padding-left: 14px; }
     ul.countermeasures li { margin-bottom: 2px; }
 
+    .desc-part { margin-bottom: 5px; }
+    .desc-part:last-child { margin-bottom: 0; }
+    .desc-part .src { color: #14213d; }
+
     .empty-state {
         text-align: center;
         color: #888;
@@ -161,6 +165,10 @@
     <div class="summary-card">
         <div class="value">{{ summary.agreement_medium }}</div>
         <div class="label">Média concordância (2/3 modelos)</div>
+    </div>
+    <div class="summary-card">
+        <div class="value">{{ summary.agreement_low }}</div>
+        <div class="label">Baixa concordância (1/3 — revisar manualmente)</div>
     </div>
     <div class="summary-card">
         <div class="value">{{ severity_counts.critical + severity_counts.high }}</div>
@@ -204,7 +212,11 @@
             {% for t in comp.threats %}
                 <tr>
                     <td class="cat-cell">{{ t.category }}<span class="cat-name">{{ t.category_label }}</span></td>
-                    <td>{{ t.description }}</td>
+                    <td>
+                        {% for part in t.description_parts %}
+                        <div class="desc-part">{% if part.source %}<strong class="src">[{{ part.source }}]</strong> {% endif %}{{ part.text }}</div>
+                        {% endfor %}
+                    </td>
                     <td><span class="sev-badge sev-{{ t.severity }}">{{ t.severity }}</span></td>
                     <td><span class="conf-badge conf-{{ t.confidence }}">{{ t.confidence }}</span></td>
                     <td>

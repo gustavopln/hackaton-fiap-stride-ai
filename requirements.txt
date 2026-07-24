@@ -9,8 +9,12 @@ ultralytics==8.2.28       # YOLOv8 — inferência do SLM em api/main.py e slm/p
 torch==2.3.0               # dependência do ultralytics (CPU por padrão; ver notebook de treino p/ GPU)
 
 # ── APIs LLM ───────────────────────────────────────────────────────────────
-anthropic==0.28.0         # Claude API
-openai==1.30.1            # OpenAI API (GPT-4o)
+# Versões antigas (anthropic==0.28.0 / openai==1.30.1) quebram com o httpx
+# atual: passam `proxies=` para httpx.Client(), parâmetro removido no
+# httpx>=0.28 → TypeError "unexpected keyword argument 'proxies'". Fix
+# oficial dos mantenedores é atualizar o SDK, não fixar o httpx antigo.
+anthropic>=0.40.0,<1.0.0  # Claude API
+openai>=1.55.3,<2.0.0     # OpenAI API (GPT-4o)
 
 # Base de contramedidas STRIDE: KB estática em stride/analyzer.py (pivot do
 # plano original de RAG/LangChain+ChromaDB — ver PLANO_SPRINT_FINAL.md).
@@ -27,6 +31,7 @@ requests==2.32.3           # app/streamlit_app.py como client HTTP da api/main.p
 
 # ── Geração de relatório PDF ───────────────────────────────────────────────
 weasyprint==62.3
+pydyf<0.11.0               # weasyprint 62.x quebra com pydyf>=0.11.0 (breaking change de API — Kozea/WeasyPrint#2620)
 jinja2==3.1.4             # templates HTML
 
 # ── Utilitários ────────────────────────────────────────────────────────────

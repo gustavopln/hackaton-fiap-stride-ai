@@ -18,13 +18,18 @@ dataset/synthetic/labels/*
 dataset/synthetic/florence2/*
 dataset/synthetic/*.zip
 
-# Pesos do modelo — exceto o best.pt final, que É versionado de propósito:
-# é o artefato treinado que a API carrega para rodar a demo sem precisar
-# retreinar (22MB, bem dentro do limite do GitHub).
+# Pesos dos modelos — exceto os best.pt finais, que SÃO versionados de
+# propósito: são os artefatos que a API carrega para rodar a demo sem
+# precisar retreinar/baixar nada (22MB + 20MB, bem dentro do limite do
+# GitHub). stride_yolov8s = componentes; stride_yolo11_pose = fluxos/setas
+# (modelo publicado pelo autor do dataset — ver Referências no README).
 slm/weights/*
 !slm/weights/stride_yolov8s/
 slm/weights/stride_yolov8s/*
 !slm/weights/stride_yolov8s/best.pt
+!slm/weights/stride_yolo11_pose/
+slm/weights/stride_yolo11_pose/*
+!slm/weights/stride_yolo11_pose/best.pt
 
 # Manter os .gitkeep
 !**/.gitkeep

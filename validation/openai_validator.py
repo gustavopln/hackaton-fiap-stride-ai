@@ -22,11 +22,11 @@ from validation.common import (
 )
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-# 4096 truncava o JSON no meio de diagramas com muitos componentes (13+
-# componentes x 6 categorias STRIDE facilmente passa de 4096 tokens de saída,
-# cortando a resposta e quebrando o parser). gpt-4o suporta até 16384 tokens
-# de saída — 8192 dá bastante folga sem chegar perto do limite.
-MAX_TOKENS = 8192
+# 4096 truncava com 13+ componentes; 8192 segurou até aqui (GPT-4o escreve
+# descrições mais curtas que o Claude), mas diagramas com 20+ componentes
+# chegam perto do limite — 12288 dá folga sem encostar no teto de 16384
+# tokens de saída do gpt-4o.
+MAX_TOKENS = 12288
 
 _client = None
 

@@ -85,6 +85,29 @@
     .boundaries ul { margin: 0; padding-left: 16px; }
     .boundaries li { margin-bottom: 3px; }
 
+    /* ── Fluxos de dados ───────────────────────────────────────────── */
+    .flows {
+        margin: 4px 0 20px 0;
+        padding: 10px 12px;
+        border-left: 3px solid #d68c8c;
+        background: #fcf5f4;
+        border-radius: 0 6px 6px 0;
+    }
+    .flows h3 { font-size: 12.5px; margin-bottom: 6px; }
+    table.flowlist { width: 100%; border-collapse: collapse; }
+    table.flowlist th {
+        text-align: left; font-size: 9px; text-transform: uppercase;
+        color: #777; padding: 4px 8px; border-bottom: 1px solid #e8d9d6;
+    }
+    table.flowlist td {
+        padding: 5px 8px; font-size: 10px; vertical-align: top;
+        border-bottom: 1px solid #f3e9e7;
+    }
+    table.flowlist tr:last-child td { border-bottom: none; }
+    .flow-arrow { color: #b3423a; font-weight: 700; white-space: nowrap; }
+    .flow-note { color: #555; }
+    .flow-note.alert { color: #9b1c1c; font-weight: 600; }
+
     /* ── Componentes / ameaças ─────────────────────────────────────── */
     .component {
         border: 1px solid #e1e4ea;
@@ -184,6 +207,48 @@
         <li><strong>{{ b.node_name }}</strong> ({{ b.class_name }}) — {{ b.note }}</li>
     {% endfor %}
     </ul>
+</div>
+{% endif %}
+
+{% if flows and flows.crossings %}
+<h2>Fluxos de dados entre componentes</h2>
+<div class="flows">
+    <h3>Fluxos de dados detectados ({{ flows.total_flows }} setas → {{ flows.connections | length }} conexões mapeadas{% if flows.orphan_flows %}, {{ flows.orphan_flows }} sem correspondência{% endif %})</h3>
+    <table class="flowlist">
+        <thead>
+            <tr>
+                <th style="width: 25%;">Fluxo (origem → destino)</th>
+                <th style="width: 9%;">Conf. detecção</th>
+                <th style="width: 33%;">Travessias de fronteira / observação</th>
+                <th style="width: 33%;">Contramedidas recomendadas</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for f in flows.crossings %}
+            <tr>
+                <td class="flow-arrow">{{ f.from_component }} → {{ f.to_component }}</td>
+                <td>{{ (f.confidence * 100) | round | int }}%</td>
+                <td class="flow-note{% if 'PÚBLICA para PRIVADA' in f.note %} alert{% endif %}">{{ f.note }}</td>
+                <td>
+                    {% if f.countermeasures %}
+                    <ul class="countermeasures">
+                    {% for cm in f.countermeasures %}
+                        <li>{{ cm }}</li>
+                    {% endfor %}
+                    </ul>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div style="font-size: 8.5px; color: #8a6a66; margin-top: 6px;">
+        Conf. detecção = confiança do detector de setas (YOLO11-pose) na existência/direção do fluxo —
+        diferente da "confiança" das ameaças por componente, que mede a concordância entre as 3 fontes
+        de análise (SLM/Claude/GPT-4o). Fluxos têm uma única fonte de detecção, portanto não há consenso a medir.
+    </div>
 </div>
 {% endif %}
 

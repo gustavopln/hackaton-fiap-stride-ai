@@ -45,8 +45,10 @@ hackathon-stride-ai/
 │   └── streamlit_app.py    # Frontend web (client HTTP da API)
 ├── slm/                    # Camada 1 — detecção de componentes (YOLOv8)
 │   ├── generate_dataset.py #   gera o dataset sintético de treino
-│   ├── predict.py          #   inferência do modelo treinado
-│   ├── weights/             #   pesos do modelo (best.pt)
+│   ├── predict.py          #   inferência do modelo de componentes
+│   ├── flows.py            #   detecção de fluxos (setas) + travessias de fronteira
+│   ├── weights/             #   pesos: stride_yolov8s (componentes) e
+│   │                        #   stride_yolo11_pose (fluxos)
 │   └── notebook-*.ipynb     #   notebook de treino executado no Kaggle
 ├── stride/
 │   └── analyzer.py          # Heurística STRIDE + base de contramedidas
@@ -100,7 +102,7 @@ Acesse `http://localhost:8501`, faça upload de um diagrama de arquitetura e cli
 
 ## Camada 1 — treinamento do SLM (YOLOv8)
 
-O modelo de detecção (YOLOv8s) foi treinado do zero para reconhecer **32 classes** de componentes de arquitetura cloud (atores, serviços de borda, computação, dados, segurança, observabilidade, integrações externas e fronteiras de confiança como VPC/subnet/autoscaling group), a partir de um dataset sintético gerado com a biblioteca `diagrams` (`slm/generate_dataset.py`) e complementado com imagens adicionais para cobrir classes raras.
+O modelo de detecção (YOLOv8s) foi treinado do zero para reconhecer **32 classes** de componentes de arquitetura cloud (atores, serviços de borda, computação, dados, segurança, observabilidade, integrações externas e fronteiras de confiança como VPC/subnet/autoscaling group). O dataset principal é o [`stride-architecture-components-v1`](https://huggingface.co/datasets/guillherms/stride-architecture-components-v1) do Guilherme Santos, baixado direto do Hugging Face Hub (`snapshot_download`) já com os splits `train`/`val`/`test` prontos. Um dataset sintético complementar, gerado localmente com a biblioteca `diagrams` (`slm/generate_dataset.py`), é opcionalmente mesclado só para cobrir 2 classes sem nenhum exemplo no dataset real (`actor_admin`, `integration_messaging`) e reforçar outras classes sub-representadas.
 
 Treino executado no Kaggle (GPU T4 x2) — [notebook completo com os outputs reais](https://www.kaggle.com/code/gustavopln/notebook-stride-architecture-components?scriptVersionId=337310807), também versionado em `slm/notebook-stride-architecture-components.ipynb`. Parada antecipada (early stopping, patience=20) na época 63 de 100, com o melhor checkpoint na época 43:
 
@@ -115,6 +117,18 @@ O recall alto (0,88) mostra que o modelo raramente deixa de detectar um componen
 
 A taxonomia das 32 classes e imagens de apoio para desenvolvimento e testes tiveram como referência o dataset público de Guilherme Santos no Hugging Face (ver [Referências](#referências)).
 
+## Fluxos de dados e travessias de fronteira
+
+Além dos componentes (nós do grafo), o sistema também detecta os **fluxos de dados** (as setas do diagrama — as arestas), completando a cobertura STRIDE: no modelo clássico, fluxos de dados são um dos elementos analisados, tipicamente sujeitos a Tampering, Information Disclosure e DoS.
+
+A detecção usa o modelo [YOLO11-pose publicado pelo autor do dataset de componentes](https://huggingface.co/guillherms/vision-architecture-analyzer-yolo11-pose) (treinado no dataset `stride-architecture-flows-v1`, das mesmas 4.190 imagens): cada seta vira uma detecção com 2 keypoints — origem e destino. O `slm/flows.py` então:
+
+1. Casa cada ponta de seta com o componente detectado mais próximo (Camada 1), formando conexões `origem → destino` — alimentando o parâmetro `connections` reservado em `stride/analyzer.py` desde o início do projeto.
+2. Cruza cada conexão com as fronteiras de confiança (`boundary_*`) detectadas no diagrama e sinaliza **travessias**: fluxo entrando na VPC, saindo de subnet privada, cruzando de subnet pública para privada (caso prioritário), etc.
+3. Recomenda contramedidas específicas por tipo de travessia (base estática `FLOW_COUNTERMEASURES`, no mesmo padrão da base de componentes) — e o par zero trust (TLS interno + autenticação serviço-a-serviço) para fluxos internos.
+
+O resultado aparece como seção própria no relatório PDF e no Streamlit (com as setas desenhadas sobre a imagem). A feature é **aditiva e tolerante a falha**: se os pesos do modelo de pose faltarem ou a detecção falhar, a análise STRIDE segue normalmente, apenas sem a seção de fluxos. Limitação conhecida: o modelo de pose detecta bem setas sólidas, mas perde parte das linhas pontilhadas finas (ex. conexões de monitoramento) — a confiança de detecção de cada fluxo é exibida no relatório para dar essa transparência.
+
 ## Teste end-to-end
 
 O pipeline foi validado com as duas arquiteturas de referência fornecidas no enunciado do hackathon (AWS multi-AZ e Azure API Management, em `docs/fiap_test_architectures/`), gerando relatórios completos em PDF com detecção de componentes, ameaças por categoria STRIDE, score de concordância entre as 3 fontes e contramedidas recomendadas para cada ameaça aplicável.
@@ -126,11 +140,13 @@ O pipeline foi validado com as duas arquiteturas de referência fornecidas no en
 
 ## Stack
 
-Python · FastAPI · Streamlit · Ultralytics YOLOv8 · Anthropic Claude · OpenAI GPT-4o · Jinja2 + WeasyPrint (PDF) · Pillow/diagrams (geração do dataset sintético)
+Python · FastAPI · Streamlit · Ultralytics YOLOv8 (componentes) + YOLO11-pose (fluxos) · Anthropic Claude · OpenAI GPT-4o · Jinja2 + WeasyPrint (PDF) · Pillow/diagrams (geração do dataset sintético)
 
 ## Referências
 
-- SANTOS, Guilherme. **STRIDE Architecture Threat Modeling Dataset (AWS & Azure)**. Hugging Face Datasets, licença MIT. Disponível em: [huggingface.co/datasets/guillherms/stride-architecture-components-v1](https://huggingface.co/datasets/guillherms/stride-architecture-components-v1). Dataset com 4.190 imagens anotadas em 32 classes (formato YOLO) de componentes de diagramas de arquitetura AWS e Azure — usado como referência para a taxonomia de classes e para imagens de apoio no desenvolvimento e testes deste projeto.
+- SANTOS, Guilherme. **STRIDE Architecture Threat Modeling Dataset (AWS & Azure)**. Hugging Face Datasets, licença MIT. Disponível em: [huggingface.co/datasets/guillherms/stride-architecture-components-v1](https://huggingface.co/datasets/guillherms/stride-architecture-components-v1). Dataset com 4.190 imagens anotadas em 32 classes (formato YOLO) de componentes de diagramas de arquitetura AWS e Azure — base do treino do SLM de componentes deste projeto.
+- SANTOS, Guilherme. **STRIDE Architecture Flows Dataset**. Hugging Face Datasets, licença MIT. Disponível em: [huggingface.co/datasets/guillherms/stride-architecture-flows-v1](https://huggingface.co/datasets/guillherms/stride-architecture-flows-v1). Mesmas imagens base, anotando as setas de fluxo (formato YOLO Pose, keypoints origem/destino).
+- SANTOS, Guilherme. **Vision Architecture Analyzer — YOLO11 Pose**. Hugging Face Models, Apache 2.0. Disponível em: [huggingface.co/guillherms/vision-architecture-analyzer-yolo11-pose](https://huggingface.co/guillherms/vision-architecture-analyzer-yolo11-pose). Modelo treinado no dataset de fluxos acima — usado diretamente (pesos publicados) pela detecção de fluxos deste projeto (`slm/flows.py`).
 
 ## Autor
 

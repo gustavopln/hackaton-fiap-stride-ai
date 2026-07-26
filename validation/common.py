@@ -53,6 +53,9 @@ Regras:
 - O campo "description" deve ser escrito SEMPRE em português do Brasil (pt-BR), mesmo que o
   restante do seu raciocínio interno seja em outro idioma — o relatório final é consumido por
   um público brasileiro e mistura de idiomas entre fontes (SLM/Claude/GPT-4o) prejudica a leitura.
+- Cada "description" deve ter UMA frase curta e direta (máximo ~15 palavras). Diagramas grandes
+  geram 100+ entradas neste JSON — descrições longas estouram o limite de tokens da resposta e
+  invalidam a análise inteira. Seja específico, não prolixo.
 """
 
 

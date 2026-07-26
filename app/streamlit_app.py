@@ -65,6 +65,31 @@ def _draw_boxes(image: Image.Image, components: list) -> Image.Image:
     return img
 
 
+def _draw_flows(image: Image.Image, components: list, connections: list) -> Image.Image:
+    """Desenha as conexões (setas de fluxo) sobre a imagem, ligando os centros
+    das bounding boxes dos componentes casados pelo slm/flows.py."""
+    import math
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    centers = {}
+    for comp in components:
+        x1, y1, x2, y2 = comp["bbox"]
+        centers[comp["component_id"]] = ((x1 + x2) / 2, (y1 + y2) / 2)
+    for conn in connections:
+        a = centers.get(conn["from_component"])
+        b = centers.get(conn["to_component"])
+        if not a or not b:
+            continue
+        draw.line([a, b], fill="#E11D48", width=3)
+        # ponta de seta no destino
+        ang = math.atan2(b[1] - a[1], b[0] - a[0])
+        size = 12
+        p1 = (b[0] - size * math.cos(ang - 0.45), b[1] - size * math.sin(ang - 0.45))
+        p2 = (b[0] - size * math.cos(ang + 0.45), b[1] - size * math.sin(ang + 0.45))
+        draw.polygon([b, p1, p2], fill="#E11D48")
+    return img
+
+
 def _threats_to_rows(analysis: dict) -> list:
     """Achata analysis['threats'] em linhas de tabela, mantendo só ameaças aplicáveis."""
     rows = []
@@ -182,6 +207,24 @@ if data:
         annotated = _draw_boxes(original, data["raw_components"])
         _safe_call(st.image, annotated, use_container_width=True)
 
+    flows = data.get("flows")
+    if flows and flows.get("connections") and st.session_state.uploaded_image and data.get("raw_components"):
+        st.subheader(f"Fluxos de dados entre componentes ({len(flows['connections'])} conexões)")
+        original = Image.open(BytesIO(st.session_state.uploaded_image)).convert("RGB")
+        flow_img = _draw_flows(original, data["raw_components"], flows["connections"])
+        _safe_call(st.image, flow_img, use_container_width=True)
+        flow_rows = [
+            {
+                "Fluxo": f"{c['from_component']} → {c['to_component']}",
+                "Conf. detecção (YOLO)": f"{c['confidence']:.0%}",
+                "Travessias / observação": c.get("note", ""),
+                "Contramedidas": " • ".join(c.get("countermeasures", [])) or "—",
+            }
+            for c in flows.get("crossings", [])
+        ]
+        if flow_rows:
+            _safe_call(st.dataframe, pd.DataFrame(flow_rows), use_container_width=True, hide_index=True)
+
     if data.get("trust_boundaries"):
         with st.expander(f"🧭 Fronteiras de confiança identificadas ({len(data['trust_boundaries'])})"):
             for b in data["trust_boundaries"]:
@@ -207,6 +250,7 @@ if data:
                         "analysis_result": analysis,
                         "diagram_name": data.get("diagram_name") or "Diagrama de Arquitetura",
                         "trust_boundaries": data.get("trust_boundaries"),
+                        "flows": data.get("flows"),
                     },
                     headers=headers,
                     timeout=REQUEST_TIMEOUT,

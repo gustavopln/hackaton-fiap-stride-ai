@@ -1,8 +1,8 @@
 """
-API FastAPI — STRIDE Architecture Analyzer.
+API FastAPI — STRIDE Architecture Analyzer (+ fluxos de dados).
 
 Endpoints:
-    POST /analyze  — recebe imagem, orquestra SLM + validação (Claude/GPT-4o) + consensus
+    POST /analyze  — recebe imagem, orquestra SLM + fluxos + validação (Claude/GPT-4o) + consensus
     POST /report   — gera PDF do relatório STRIDE a partir do resultado de /analyze
 
 Autenticação: se a variável de ambiente APP_API_KEY estiver definida, os
@@ -26,9 +26,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from PIL import Image as PILImage
 from pydantic import BaseModel
 
 from slm.predict import _load_model, detect_components
+from slm.flows import analyze_data_flows
 from stride.analyzer import BOUNDARY_CLASSES, analyze, identify_trust_boundaries
 from validation import claude_validator, openai_validator
 from validation.consensus import build_final_report
@@ -44,7 +46,7 @@ ALLOWED_CONTENT_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
 app = FastAPI(
     title="STRIDE Architecture Analyzer",
     description="Detecção automática de ameaças em diagramas de arquitetura cloud.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -64,13 +66,8 @@ def _check_api_key(x_api_key: Optional[str]) -> None:
 def _warm_up_slm() -> None:
     """
     Carrega os pesos do YOLOv8 assim que a API sobe, em vez de na primeira
-    requisição. Sem isso, quem chamar /analyze primeiro (ex. durante uma
-    demo ao vivo) paga o custo de carregar o modelo na hora — em teste local
-    isso passou de 60s no cold start; com o warm-up, a 1ª requisição real já
-    sai em menos de 1s, igual as seguintes (ver slm/predict.py, _model_cache).
-    Se os pesos não existirem ainda, só loga o aviso — a API sobe mesmo assim
-    e cada chamada a /analyze vai falhar com 503 até o best.pt ser colocado
-    em slm/weights/stride_yolov8s/.
+    requisição (ver slm/predict.py, _model_cache). Se os pesos não existirem
+    ainda, só loga o aviso — a API sobe mesmo assim.
     """
     try:
         _load_model()
@@ -82,25 +79,18 @@ class ReportRequest(BaseModel):
     analysis_result: dict
     diagram_name: str = "Diagrama de Arquitetura"
     trust_boundaries: Optional[list] = None
+    flows: Optional[dict] = None
 
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": "0.3.0"}
 
 
 async def _run_validators(image_path: str, components: list[dict]) -> tuple[Optional[dict], Optional[dict]]:
     """
-    Chama Claude e GPT-4o em paralelo (Camada 2). Cada validador é síncrono/
-    bloqueante (chamada HTTP à API do modelo), então roda em thread separada
-    via asyncio.to_thread para não travar o event loop nem serializar as duas
-    chamadas.
-
-    Se um validador falhar (chave ausente, erro de rede, rate limit, JSON
-    malformado mesmo após a recuperação em claude_validator/openai_validator),
-    a falha é isolada: aquela fonte vira None e o Consensus Engine simplesmente
-    calcula a concordância com as fontes restantes, em vez de derrubar a
-    análise inteira. Falha parcial > falha total nesse pipeline.
+    Chama Claude e GPT-4o em paralelo (Camada 2), com isolamento de falha —
+    ver comentários detalhados no projeto principal.
     """
     async def _safe_call(label, fn, *args):
         start = time.monotonic()
@@ -112,9 +102,6 @@ async def _run_validators(image_path: str, components: list[dict]) -> tuple[Opti
             return result
         except Exception as exc:  # noqa: BLE001 — isolamento de falha é intencional aqui
             elapsed = time.monotonic() - start
-            # Loga no terminal do uvicorn para diagnóstico — sem isso, a falha
-            # vira só um "indisponível" genérico no frontend e fica impossível
-            # saber se foi chave ausente, rate limit, JSON malformado, etc.
             print(f"[validators] {label} falhou após {elapsed:.1f}s: {exc!r}")
             return {"__error__": str(exc)}
 
@@ -132,12 +119,13 @@ async def _run_validators(image_path: str, components: list[dict]) -> tuple[Opti
 @app.post("/analyze")
 async def analyze_diagram(image: UploadFile = File(...), x_api_key: Optional[str] = Header(None)):
     """
-    Recebe uma imagem de diagrama de arquitetura e orquestra as 3 camadas:
-    SLM (YOLOv8) → validação Claude + GPT-4o (paralelo) → Consensus Engine.
+    Orquestra: SLM (YOLOv8) → fluxos (YOLO11-pose) → validação Claude + GPT-4o
+    (paralelo) → Consensus Engine.
 
-    Retorna o relatório consolidado (mesmo schema de validation.consensus.build_final_report)
-    mais os componentes brutos detectados pelo SLM e as fronteiras de confiança
-    identificadas no diagrama.
+    A detecção de fluxos é ADITIVA e tolerante a falha: se os pesos do modelo
+    de pose não estiverem presentes (ou a detecção falhar), a análise STRIDE
+    segue normalmente, só sem a seção de fluxos — mesma filosofia de
+    degradação parcial usada nos validadores LLM.
     """
     _check_api_key(x_api_key)
 
@@ -173,18 +161,44 @@ async def analyze_diagram(image: UploadFile = File(...), x_api_key: Optional[str
                     "total_components": 0, "agreement_high": 0, "agreement_medium": 0, "agreement_low": 0,
                 }},
                 "trust_boundaries": [],
+                "flows": None,
                 "warnings": ["Nenhum componente detectado nessa imagem — verifique se é um diagrama de arquitetura válido."],
             }
 
-        slm_output = analyze(components, connections=[])
         trust_boundaries = identify_trust_boundaries(components)
 
-        # Fronteiras de confiança (boundary_*) não são ativos atacáveis — o
-        # SLM já as exclui do cálculo STRIDE (ver stride/analyzer.py). Não
-        # mandamos elas para os validadores LLM também, senão Claude/GPT-4o
-        # podem "inventar" ameaças para uma fronteira que o resto do pipeline
-        # trata como contexto, e ela reaparece no relatório final via
-        # consensus.merge_components (bug encontrado em teste local).
+        # Camada 1.5 — fluxos de dados (YOLO11-pose, aditivo/tolerante a falha)
+        flows_data = None
+        flows_warning = None
+        try:
+            with PILImage.open(tmp_path) as im:
+                image_size = im.size
+            flows_data = analyze_data_flows(tmp_path, components, image_size)
+            print(f"[flows] {flows_data['total_flows']} setas, "
+                  f"{len(flows_data['connections'])} conexões, "
+                  f"{flows_data['orphan_flows']} órfãs")
+            if not flows_data["connections"]:
+                # Sem aviso explícito, a seção de fluxos some do relatório em
+                # silêncio e o usuário fica sem saber se é bug ou limitação —
+                # setas muito finas/pontilhadas ficam fora do alcance do modelo
+                # de pose (limitação conhecida, ver README).
+                flows_warning = (
+                    "Nenhum fluxo de dados mapeado nesta imagem "
+                    f"({flows_data['total_flows']} seta(s) detectada(s), nenhuma com correspondência "
+                    "entre componentes) — o relatório segue sem a seção de fluxos. Setas muito finas "
+                    "ou pontilhadas estão fora do alcance do detector atual."
+                )
+        except FileNotFoundError as exc:
+            flows_warning = f"Detecção de fluxos indisponível: {exc}"
+            print(f"[flows] {flows_warning}")
+        except Exception as exc:  # noqa: BLE001 — fluxos nunca derrubam a análise
+            flows_warning = "Detecção de fluxos falhou nesta análise — relatório segue sem a seção de fluxos."
+            print(f"[flows] falhou: {exc!r}")
+
+        connections = (flows_data or {}).get("connections", [])
+        slm_output = analyze(components, connections=connections)
+
+        # Fronteiras de confiança não vão para os validadores LLM (ver projeto principal).
         attackable_components = [c for c in components if c["class_name"] not in BOUNDARY_CLASSES]
 
         # Camada 2 — Claude + GPT-4o (paralelo, com isolamento de falha)
@@ -198,6 +212,8 @@ async def analyze_diagram(image: UploadFile = File(...), x_api_key: Optional[str
             warnings.append("Validação Claude indisponível nesta análise — confiança calculada só com SLM/GPT-4o.")
         if openai_output is None:
             warnings.append("Validação GPT-4o indisponível nesta análise — confiança calculada só com SLM/Claude.")
+        if flows_warning:
+            warnings.append(flows_warning)
 
         return {
             "diagram_name": image.filename,
@@ -205,6 +221,7 @@ async def analyze_diagram(image: UploadFile = File(...), x_api_key: Optional[str
             "raw_components": components,
             "analysis": final_report,
             "trust_boundaries": trust_boundaries,
+            "flows": flows_data,
             "warnings": warnings,
         }
     finally:
@@ -215,7 +232,7 @@ async def analyze_diagram(image: UploadFile = File(...), x_api_key: Optional[str
 async def generate_report(payload: ReportRequest, x_api_key: Optional[str] = Header(None)):
     """
     Gera o PDF do relatório STRIDE a partir do resultado retornado por /analyze
-    (campo "analysis", e opcionalmente "trust_boundaries" e "diagram_name").
+    (campos "analysis", e opcionalmente "trust_boundaries", "flows" e "diagram_name").
     """
     _check_api_key(x_api_key)
 
@@ -228,6 +245,7 @@ async def generate_report(payload: ReportRequest, x_api_key: Optional[str] = Hea
             str(output_path),
             diagram_name=payload.diagram_name,
             trust_boundaries=payload.trust_boundaries,
+            flows=payload.flows,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Falha ao gerar PDF: {exc}") from exc

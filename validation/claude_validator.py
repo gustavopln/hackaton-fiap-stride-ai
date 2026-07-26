@@ -24,11 +24,14 @@ from validation.common import (
 )
 
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
-# 4096 truncava o JSON no meio de diagramas com muitos componentes (13+
-# componentes x 6 categorias STRIDE facilmente passa de 4096 tokens de saída,
-# cortando a resposta e quebrando o parser). Claude Sonnet 5 suporta até
-# 128k de max_tokens — 8192 dá bastante folga sem custo relevante.
-MAX_TOKENS = 8192
+# Histórico desse limite: 4096 truncava com 13+ componentes; 8192 resolveu os
+# diagramas médios, mas o teste com a arquitetura AWS da FIAP (21 componentes
+# atacáveis x 6 categorias = 126 objetos de ameaça no JSON) estourou de novo —
+# truncamento de VOLUME DE RESPOSTA, não de thinking (que já está desligado).
+# 16384 cobre ~40 componentes com folga. max_tokens é um TETO, não custo
+# pré-pago: o cenário caro é o truncamento, que joga fora a 1ª chamada inteira
+# e paga uma retentativa completa. Claude Sonnet 5 suporta até 128k de saída.
+MAX_TOKENS = 16384
 
 _client = None
 
@@ -45,7 +48,10 @@ def _get_client() -> anthropic.Anthropic:
         # timeout explícito — sem isso, uma chamada travada na rede fica pendurada
         # indefinidamente e o Streamlit só mostra "demorou demais", sem log nenhum
         # no terminal do backend (o request nem chegou a falhar do lado do SDK).
-        _client = anthropic.Anthropic(api_key=api_key, timeout=90.0)
+        # 150s (era 90s): com MAX_TOKENS=16384, uma resposta grande pode
+        # legitimamente passar de 90s de geração — timeout curto demais viraria
+        # uma nova fonte de falha justamente nos diagramas maiores.
+        _client = anthropic.Anthropic(api_key=api_key, timeout=150.0)
     return _client
 
 

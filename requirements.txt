@@ -5,7 +5,7 @@ huggingface_hub==0.23.0   # download de datasets do Hugging Face
 
 # ── SLM / Detecção de objetos (YOLOv8) ─────────────────────────────────────
 # Pivot Florence-2 → YOLOv8 (ver PLANO_SPRINT_FINAL.md).
-ultralytics==8.2.28       # YOLOv8 — inferência do SLM em api/main.py e slm/predict.py
+ultralytics>=8.3.0,<9.0.0 # YOLOv8 (componentes) + YOLO11-pose (fluxos/setas) — 8.3+ exigido pelo YOLO11
 torch==2.3.0               # dependência do ultralytics (CPU por padrão; ver notebook de treino p/ GPU)
 
 # ── APIs LLM ───────────────────────────────────────────────────────────────

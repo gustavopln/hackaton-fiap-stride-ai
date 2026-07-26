@@ -113,7 +113,26 @@ Treino executado no Kaggle (GPU T4 x2) — [notebook completo com os outputs rea
 | Precision | 0,55 |
 | Recall | 0,88 |
 
-O recall alto (0,88) mostra que o modelo raramente deixa de detectar um componente presente no diagrama — importante para não deixar ameaças de fora da análise. A precision mais moderada (0,55) reflete alguns falsos positivos entre classes visualmente parecidas (ex. variações de ícones de computação); esse ruído é absorvido pelas Camadas 2 e 3, já que Claude e GPT-4o reavaliam cada componente contra a imagem original antes do relatório final. Gráficos completos (matriz de confusão, curvas P/R/F1, batches de validação) em `docs/training_results/`.
+O recall alto (0,88) mostra que o modelo raramente deixa de detectar um componente presente no diagrama — importante para não deixar ameaças de fora da análise. A precision mais moderada (0,55) reflete alguns falsos positivos entre classes visualmente parecidas (ex. variações de ícones de computação); esse ruído é absorvido pelas Camadas 2 e 3, já que Claude e GPT-4o reavaliam cada componente contra a imagem original antes do relatório final.
+
+### Evidências visuais do treino
+
+![Matriz de confusão normalizada — 32 classes](docs/training_results/confusion_matrix_normalized.png)
+
+*Matriz de confusão normalizada: diagonal forte em praticamente todas as 32 classes — incluindo `actor_admin` e `integration_messaging`, que tinham zero exemplos antes da mescla sintética (a prova de que a correção do desbalanceamento funcionou). As confusões residuais concentram-se entre `actor_admin`/`actor_user` (ícones de pessoa visualmente similares) e no bloco de serviços externos.*
+
+![Curvas de treino — losses e métricas por época](docs/training_results/results.png)
+
+*Curvas de treino (63 épocas até o early stopping): losses de treino e validação estabilizam sem divergir — overfitting leve, sem sinal de colapso — enquanto precision/recall/mAP sobem e estabilizam.*
+
+<p align="center">
+  <img src="docs/training_results/val_batch0_labels.jpg" width="49%" alt="Batch de validação — anotações reais (ground truth)">
+  <img src="docs/training_results/val_batch0_pred.jpg" width="49%" alt="Batch de validação — predições do modelo">
+</p>
+
+*Batch de validação lado a lado: à esquerda, as anotações reais (ground truth); à direita, as predições do modelo com os scores de confiança — útil para inspecionar visualmente onde o modelo acerta e erra por classe.*
+
+Demais gráficos (curvas P/R/F1 por limiar de confiança, batches de treino, `args.yaml` com a configuração completa) em `docs/training_results/`.
 
 A taxonomia das 32 classes e imagens de apoio para desenvolvimento e testes tiveram como referência o dataset público de Guilherme Santos no Hugging Face (ver [Referências](#referências)).
 

@@ -11,26 +11,28 @@ Imagem do diagrama
         │
         ▼
 ┌───────────────────────────┐
-│ Camada 1 — SLM (YOLOv8)   │  detecção de componentes (32 classes) +
-│  stride/analyzer.py       │  heurística STRIDE + base de contramedidas
+│ Camada 1 — SLM            │  detecção de componentes (32 classes,
+│  stride/analyzer.py       │  YOLOv8) + fluxos de dados/setas
+│  slm/flows.py             │  (YOLO11-pose) + heurística STRIDE +
+│                           │  base de contramedidas
 └───────────────────────────┘
         │
         ▼
 ┌───────────────────────────┐
 │ Camada 2 — Validação LLM  │  Claude e GPT-4o analisam a MESMA imagem +
 │  (Claude ∥ GPT-4o)        │  componentes detectados, em paralelo e de
-│                            │  forma independente uma da outra
+│                           │  forma independente uma da outra
 └───────────────────────────┘
         │
         ▼
 ┌───────────────────────────┐
-│ Camada 3 — Consensus       │  combina as 3 análises (SLM + Claude +
-│  Engine                    │  GPT-4o), calcula o score de concordância
-│  validation/consensus.py   │  (alta/média/baixa) e a severidade final
+│ Camada 3 — Consensus      │  combina as 3 análises (SLM + Claude +
+│  Engine                   │  GPT-4o), calcula o score de concordância
+│  validation/consensus.py  │  (alta/média/baixa) e a severidade final
 └───────────────────────────┘
         │
         ▼
-  Relatório STRIDE em PDF
+  Relatório STRIDE em PDF (componentes + fluxos de dados)
 ```
 
 As 3 fontes analisam o diagrama **de forma independente** — o SLM não valida a saída do Claude/GPT-4o via RAG nem nada parecido; cada uma chega à sua própria conclusão sobre os mesmos componentes, e é só na Camada 3 que os resultados são comparados e combinados. Quando as 3 concordam, a confiança da ameaça é "alta"; quando só uma fonte identifica algo que as outras não viram, a confiança fica "baixa" e fica sinalizado para revisão manual — isso é uma característica desejada do desenho, não um defeito: é o próprio motivo de usar 3 avaliadores independentes em vez de um só.
@@ -108,12 +110,12 @@ Treino executado no Kaggle (GPU T4 x2) — [notebook completo com os outputs rea
 
 | Métrica | Valor |
 |---|---|
-| mAP50 | 0,70 |
-| mAP50-95 | 0,58 |
-| Precision | 0,55 |
-| Recall | 0,88 |
+| mAP50 | 0,72 |
+| mAP50-95 | 0,59 |
+| Precision | 0,54 |
+| Recall | 0,89 |
 
-O recall alto (0,88) mostra que o modelo raramente deixa de detectar um componente presente no diagrama — importante para não deixar ameaças de fora da análise. A precision mais moderada (0,55) reflete alguns falsos positivos entre classes visualmente parecidas (ex. variações de ícones de computação); esse ruído é absorvido pelas Camadas 2 e 3, já que Claude e GPT-4o reavaliam cada componente contra a imagem original antes do relatório final.
+O recall alto (0,89) mostra que o modelo raramente deixa de detectar um componente presente no diagrama — importante para não deixar ameaças de fora da análise. A precision mais moderada (0,54) não é uniforme entre as 32 classes: o log de validação por classe mostra que ela é puxada pra baixo por um grupo específico de classes raras — `actor_admin` (13 instâncias, precision 0,26), `integration_messaging` (22, 0,27), `edge_portal` (10, 0,38), `compute_worker` (28, 0,40) — exatamente as classes que tinham poucos ou zero exemplos reais antes da mescla sintética. Recall alto nessas classes mostra que o modelo aprendeu a forma; precision baixa mostra que ainda confunde com classes visualmente parecidas, esperado com poucos exemplos reais para ensinar a diferença fina. Classes bem representadas (100+ instâncias) ficam com precision entre 0,70 e 0,76. Esse ruído é absorvido pelas Camadas 2 e 3, já que Claude e GPT-4o reavaliam cada componente contra a imagem original antes do relatório final — detalhamento completo por classe em `docs/training_results/results.csv`.
 
 ### Evidências visuais do treino
 
@@ -147,6 +149,8 @@ A detecção usa o modelo [YOLO11-pose publicado pelo autor do dataset de compon
 3. Recomenda contramedidas específicas por tipo de travessia (base estática `FLOW_COUNTERMEASURES`, no mesmo padrão da base de componentes) — e o par zero trust (TLS interno + autenticação serviço-a-serviço) para fluxos internos.
 
 O resultado aparece como seção própria no relatório PDF e no Streamlit (com as setas desenhadas sobre a imagem). A feature é **aditiva e tolerante a falha**: se os pesos do modelo de pose faltarem ou a detecção falhar, a análise STRIDE segue normalmente, apenas sem a seção de fluxos. Limitação conhecida: o modelo de pose detecta bem setas sólidas, mas perde parte das linhas pontilhadas finas (ex. conexões de monitoramento) — a confiança de detecção de cada fluxo é exibida no relatório para dar essa transparência.
+
+**Por que YOLOv8 para componentes e YOLO11-pose para fluxos?** São duas tarefas desacopladas com formatos de anotação diferentes — bounding box (retângulo por componente) vs. pose (2 keypoints por seta, origem/destino), que exige a variante `-pose` da arquitetura. O modelo de componentes foi treinado do zero para este projeto em bounding box; o de fluxos é de terceiros, publicado pelo autor do dataset apenas na variante YOLO11-pose (sem equivalente -pose em YOLOv8 disponível). As duas versões não trocam dados nem competem no mesmo pipeline — cada uma roda de forma independente sobre a mesma imagem, e os resultados só se encontram na geração do relatório, por casamento de coordenadas, nunca por compatibilidade de pesos ou arquitetura. YOLOv8 e YOLO11 são, na prática, duas gerações da mesma família Ultralytics (mesma API `ultralytics.YOLO`, mesmo formato `.pt`), diferindo em blocos internos da arquitetura — ganho incremental de desempenho, não mudança de paradigma. Retreinar o modelo de componentes em YOLO11 só para uniformizar a versão foi avaliado e descartado: exigiria revalidar do zero as métricas já reportadas (mAP50 0,72, recall 0,89) sem ganho concreto, dado que os dois modelos nunca interagem numericamente.
 
 ## Teste end-to-end
 
